@@ -10,13 +10,16 @@ import (
 	"time"
 
 	"github.com/DoMinhHHung/beester/api-gateway/internal/config"
+	"github.com/DoMinhHHung/beester/api-gateway/internal/httpapi"
 	"github.com/DoMinhHHung/beester/api-gateway/internal/server"
 )
 
 const shutdownTimeout = 10 * time.Second
 
 func main() {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	logger := slog.New(
+		slog.NewTextHandler(os.Stdout, nil),
+	)
 
 	if err := run(logger); err != nil {
 		logger.Error(
@@ -40,8 +43,11 @@ func run(logger *slog.Logger) error {
 		slog.String("http_addr", cfg.HTTPAddr),
 	)
 
+	handler := httpapi.NewHandler(logger)
+
 	httpServer := server.NewHTTPServer(
 		cfg.HTTPAddr,
+		handler,
 		logger,
 	)
 
@@ -77,7 +83,7 @@ func run(logger *slog.Logger) error {
 	defer cancel()
 
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		return err
+		return fmt.Errorf("shutdown http server: %w", err)
 	}
 
 	if err := <-serverErr; err != nil {
