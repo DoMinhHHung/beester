@@ -1,27 +1,90 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"net/http"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/DoMinhHHung/beester/api-gateway/internal/config"
+	"github.com/DoMinhHHung/beester/api-gateway/internal/server"
 )
 
+const shutdownTimeout = 10 * time.Second
+
 func main() {
-	mux := http.NewServeMux()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
+	if err := run(logger); err != nil {
+		logger.Error(
+			"application stopped",
+			slog.Any("error", err),
+		)
 
-		if _, err := w.Write([]byte("OK\n")); err != nil {
-			return
+		os.Exit(1)
+	}
+}
+
+func run(logger *slog.Logger) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load configuration: %w", err)
+	}
+
+	logger.Info(
+		"application starting",
+		slog.String("app_env", cfg.AppEnv),
+		slog.String("http_addr", cfg.HTTPAddr),
+	)
+
+	httpServer := server.NewHTTPServer(
+		cfg.HTTPAddr,
+		logger,
+	)
+
+	signalCtx, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+	defer stop()
+
+	serverErr := make(chan error, 1)
+
+	go func() {
+		serverErr <- httpServer.Run()
+	}()
+
+	select {
+	case err := <-serverErr:
+		if err != nil {
+			return fmt.Errorf("run http server: %w", err)
 		}
-	})
 
-	server := &http.Server{
-		Addr:    ":8080",
-		Handler: mux,
+		return nil
+
+	case <-signalCtx.Done():
+		logger.Info("shutdown signal received")
 	}
 
-	if err := server.ListenAndServe(); err != nil {
-		panic(fmt.Errorf("run HTTP server: %w", err))
+	shutdownCtx, cancel := context.WithTimeout(
+		context.Background(),
+		shutdownTimeout,
+	)
+	defer cancel()
+
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		return err
 	}
+
+	if err := <-serverErr; err != nil {
+		return fmt.Errorf("wait for http server: %w", err)
+	}
+
+	logger.Info("application stopped gracefully")
+
+	return nil
 }
