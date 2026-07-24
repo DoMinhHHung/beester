@@ -11,6 +11,7 @@ import (
 
 	"github.com/DoMinhHHung/beester/api-gateway/internal/config"
 	"github.com/DoMinhHHung/beester/api-gateway/internal/httpapi"
+	"github.com/DoMinhHHung/beester/api-gateway/internal/readiness"
 	"github.com/DoMinhHHung/beester/api-gateway/internal/server"
 )
 
@@ -43,11 +44,17 @@ func run(logger *slog.Logger) error {
 		slog.String("http_addr", cfg.HTTPAddr),
 	)
 
+	readinessChecker, err := readiness.New()
+	if err != nil {
+		return fmt.Errorf(
+			"create readiness checker: %w",
+			err,
+		)
+	}
+
 	handler := httpapi.NewHandler(
 		logger,
-		func(context.Context) error {
-			return nil
-		},
+		readinessChecker.Check,
 	)
 
 	httpServer := server.NewHTTPServer(
