@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"github.com/DoMinhHHung/beester/api-gateway/internal/middleware"
 	"log/slog"
 	"net/http"
 )
@@ -20,5 +21,5 @@ func NewHandler(logger *slog.Logger) http.Handler {
 		}
 	})
 
-	return mux
+	return middleware.RequestID(mux)
 }
