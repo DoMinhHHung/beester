@@ -21,5 +21,10 @@ func NewHandler(logger *slog.Logger) http.Handler {
 		}
 	})
 
-	return middleware.RequestID(mux)
+	return middleware.RequestID(
+		middleware.AccessLog(
+			logger,
+			mux,
+		),
+	)
 }
