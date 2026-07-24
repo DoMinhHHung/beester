@@ -43,7 +43,12 @@ func run(logger *slog.Logger) error {
 		slog.String("http_addr", cfg.HTTPAddr),
 	)
 
-	handler := httpapi.NewHandler(logger)
+	handler := httpapi.NewHandler(
+		logger,
+		func(context.Context) error {
+			return nil
+		},
+	)
 
 	httpServer := server.NewHTTPServer(
 		cfg.HTTPAddr,
