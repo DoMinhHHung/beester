@@ -84,7 +84,12 @@ func run(logger *slog.Logger) error {
 		httpSpecs = append(httpSpecs, upstream.HTTPSpec{Name: configured.Name, Target: configured.Target})
 	}
 	forwardAuthorization := !cfg.JWT.Enabled || cfg.JWT.ForwardAuthorization
-	httpRegistry, err := upstream.NewHTTP(httpSpecs, logger, cfg.JWT.UserIDHeader, forwardAuthorization)
+	httpRegistry, err := upstream.NewHTTP(
+		httpSpecs,
+		logger,
+		cfg.JWT.UserIDHeader,
+		forwardAuthorization,
+	)
 	if err != nil {
 		return fmt.Errorf("create HTTP upstream registry: %w", err)
 	}
@@ -144,28 +149,56 @@ func run(logger *slog.Logger) error {
 	var gatewayHandler http.Handler = dispatcher
 	gatewayHandler = middleware.BodyLimit(cfg.MaxRequestBodyBytes, gatewayHandler)
 	if limiter != nil {
-		gatewayHandler = middleware.RateLimit(logger, limiter, cfg.RateLimit.FailOpen, cfg.RateLimit.TrustProxy, gatewayHandler)
+		gatewayHandler = middleware.RateLimit(
+			logger,
+			limiter,
+			cfg.RateLimit.FailOpen,
+			cfg.RateLimit.TrustProxy,
+			gatewayHandler,
+		)
 	}
 	if jwtValidator != nil {
-		gatewayHandler = middleware.JWTAuth(jwtValidator, cfg.JWT.PublicPathPrefixes, cfg.JWT.UserIDHeader, gatewayHandler)
+		gatewayHandler = middleware.JWTAuth(
+			jwtValidator,
+			cfg.JWT.PublicPathPrefixes,
+			cfg.JWT.UserIDHeader,
+			gatewayHandler,
+		)
 	}
 
-	httpHandler := httpapi.NewHandler(logger, readinessChecker.Check, httpapi.WithGatewayHandler(gatewayHandler))
+	httpHandler := httpapi.NewHandler(
+		logger,
+		readinessChecker.Check,
+		httpapi.WithGatewayHandler(gatewayHandler),
+	)
 	httpServer := server.NewHTTPServer(cfg.HTTPAddr, httpHandler, logger)
 
 	var grpcServer *server.GRPCServer
 	if cfg.GRPCAddr != "" {
-		grpcProxy := grpcproxy.New(grpcRouteTable, grpcRegistry, cfg.JWT.UserIDHeader, forwardAuthorization)
+		grpcProxy := grpcproxy.New(
+			grpcRouteTable,
+			grpcRegistry,
+			cfg.JWT.UserIDHeader,
+			forwardAuthorization,
+		)
+
 		streamInterceptors := []grpc.StreamServerInterceptor{
 			grpcmiddleware.RequestIDStreamInterceptor,
 			grpcmiddleware.AccessLogStreamInterceptor(logger),
 		}
 		if jwtValidator != nil {
-			streamInterceptors = append(streamInterceptors, grpcmiddleware.JWTAuthStreamInterceptor(jwtValidator, cfg.JWT.PublicGRPCMethodPrefixes))
+			streamInterceptors = append(
+				streamInterceptors,
+				grpcmiddleware.JWTAuthStreamInterceptor(jwtValidator, cfg.JWT.PublicGRPCMethodPrefixes),
+			)
 		}
 		if limiter != nil {
-			streamInterceptors = append(streamInterceptors, grpcmiddleware.RateLimitStreamInterceptor(logger, limiter, cfg.RateLimit.FailOpen))
+			streamInterceptors = append(
+				streamInterceptors,
+				grpcmiddleware.RateLimitStreamInterceptor(logger, limiter, cfg.RateLimit.FailOpen),
+			)
 		}
+
 		grpcServer = server.NewGRPCServer(
 			cfg.GRPCAddr,
 			logger,
@@ -182,7 +215,13 @@ func newJWTValidator(cfg config.Config) (*auth.Validator, error) {
 	if !cfg.JWT.Enabled {
 		return nil, nil
 	}
-	validator, err := auth.NewHMACValidator(cfg.JWT.HMACSecret, cfg.JWT.Issuer, cfg.JWT.Audience, cfg.JWT.UserIDClaim, cfg.JWT.Leeway)
+	validator, err := auth.NewHMACValidator(
+		cfg.JWT.HMACSecret,
+		cfg.JWT.Issuer,
+		cfg.JWT.Audience,
+		cfg.JWT.UserIDClaim,
+		cfg.JWT.Leeway,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("create JWT validator: %w", err)
 	}
@@ -193,8 +232,18 @@ func newRateLimiter(cfg config.Config) (*redis.Client, ratelimit.Limiter, error)
 	if !cfg.RateLimit.Enabled {
 		return nil, nil, nil
 	}
-	client := redis.NewClient(&redis.Options{Addr: cfg.RateLimit.RedisAddr, Password: cfg.RateLimit.RedisPassword, DB: cfg.RateLimit.RedisDB})
-	limiter, err := ratelimit.NewRedisLimiter(client, cfg.RateLimit.Capacity, cfg.RateLimit.RefillPerSecond, cfg.RateLimit.KeyPrefix)
+
+	client := redis.NewClient(&redis.Options{
+		Addr:     cfg.RateLimit.RedisAddr,
+		Password: cfg.RateLimit.RedisPassword,
+		DB:       cfg.RateLimit.RedisDB,
+	})
+	limiter, err := ratelimit.NewRedisLimiter(
+		client,
+		cfg.RateLimit.Capacity,
+		cfg.RateLimit.RefillPerSecond,
+		cfg.RateLimit.KeyPrefix,
+	)
 	if err != nil {
 		_ = client.Close()
 		return nil, nil, fmt.Errorf("create rate limiter: %w", err)
@@ -202,26 +251,47 @@ func newRateLimiter(cfg config.Config) (*redis.Client, ratelimit.Limiter, error)
 	return client, limiter, nil
 }
 
-func newReadinessChecker(cfg config.Config, grpcRegistry *upstream.Registry, redisClient *redis.Client) (*readiness.Checker, error) {
+func newReadinessChecker(
+	cfg config.Config,
+	grpcRegistry *upstream.Registry,
+	redisClient *redis.Client,
+) (*readiness.Checker, error) {
 	checks := make([]readiness.Check, 0, len(cfg.GRPCUpstreams)+1)
 	for _, spec := range cfg.GRPCUpstreams {
 		conn, ok := grpcRegistry.Conn(spec.Name)
 		if !ok {
 			return nil, fmt.Errorf("lookup configured gRPC upstream %q", spec.Name)
 		}
-		name, upstreamConn := spec.Name, conn
-		checks = append(checks, readiness.Check{Name: "grpc:" + name, Run: func(ctx context.Context) error {
-			return grpcclient.CheckHealth(ctx, upstreamConn, "")
-		}})
+		name := spec.Name
+		upstreamConn := conn
+		checks = append(checks, readiness.Check{
+			Name: "grpc:" + name,
+			Run: func(ctx context.Context) error {
+				return grpcclient.CheckHealth(ctx, upstreamConn, "")
+			},
+		})
 	}
 	if redisClient != nil {
-		checks = append(checks, readiness.Check{Name: "redis", Run: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }})
+		checks = append(checks, readiness.Check{
+			Name: "redis",
+			Run: func(ctx context.Context) error {
+				return redisClient.Ping(ctx).Err()
+			},
+		})
 	}
 	return readiness.New(checks...)
 }
 
-func runServers(logger *slog.Logger, httpServer *server.HTTPServer, grpcServer *server.GRPCServer) error {
-	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+func runServers(
+	logger *slog.Logger,
+	httpServer *server.HTTPServer,
+	grpcServer *server.GRPCServer,
+) error {
+	signalCtx, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
 	defer stop()
 
 	serverCount := 1
@@ -248,6 +318,7 @@ func runServers(logger *slog.Logger, httpServer *server.HTTPServer, grpcServer *
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
+
 	var shutdownErrors []error
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		shutdownErrors = append(shutdownErrors, err)
@@ -278,7 +349,9 @@ func runServers(logger *slog.Logger, httpServer *server.HTTPServer, grpcServer *
 	return nil
 }
 
-func newGRPCTransportCredentials(mode config.GRPCTransportSecurity) (credentials.TransportCredentials, error) {
+func newGRPCTransportCredentials(
+	mode config.GRPCTransportSecurity,
+) (credentials.TransportCredentials, error) {
 	switch mode {
 	case config.GRPCTransportSecurityTLS:
 		return credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12}), nil
