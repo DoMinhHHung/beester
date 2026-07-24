@@ -1,31 +1,28 @@
 package middleware
 
 import (
-	"context"
 	"net/http"
 
+	"github.com/DoMinhHHung/beester/api-gateway/internal/requestid"
 	"github.com/google/uuid"
 )
 
-const RequestIDHeader = "X-Request-ID"
-
-type requestIDContextKey struct{}
+const RequestIDHeader = requestid.Header
 
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestID := requestIDFromHeader(r)
+		id := requestIDFromHeader(r)
 
-		if requestID == "" {
-			requestID = uuid.Must(uuid.NewV7()).String()
+		if id == "" {
+			id = uuid.Must(uuid.NewV7()).String()
 		}
 
-		ctx := context.WithValue(
+		ctx := requestid.WithContext(
 			r.Context(),
-			requestIDContextKey{},
-			requestID,
+			id,
 		)
 
-		w.Header().Set(RequestIDHeader, requestID)
+		w.Header().Set(RequestIDHeader, id)
 
 		next.ServeHTTP(
 			w,
@@ -34,22 +31,15 @@ func RequestID(next http.Handler) http.Handler {
 	})
 }
 
-func GetRequestID(ctx context.Context) string {
-	requestID, _ := ctx.Value(requestIDContextKey{}).(string)
-
-	return requestID
-}
-
 func requestIDFromHeader(r *http.Request) string {
 	value := r.Header.Get(RequestIDHeader)
 	if value == "" {
 		return ""
 	}
 
-	id, err := uuid.Parse(value)
-	if err != nil {
+	if _, err := uuid.Parse(value); err != nil {
 		return ""
 	}
 
-	return id.String()
+	return value
 }

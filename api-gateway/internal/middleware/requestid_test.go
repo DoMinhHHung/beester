@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/DoMinhHHung/beester/api-gateway/internal/requestid"
 	"github.com/google/uuid"
 )
 
@@ -12,7 +13,7 @@ func TestRequestIDGeneratesUUIDv7(t *testing.T) {
 	var capturedRequestID string
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		capturedRequestID = GetRequestID(r.Context())
+		capturedRequestID = requestid.FromContext(r.Context())
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -54,7 +55,7 @@ func TestRequestIDPreservesValidIncomingID(t *testing.T) {
 	var capturedRequestID string
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		capturedRequestID = GetRequestID(r.Context())
+		capturedRequestID = requestid.FromContext(r.Context())
 	})
 
 	handler := RequestID(next)
@@ -77,7 +78,7 @@ func TestRequestIDPreservesValidIncomingID(t *testing.T) {
 
 func TestRequestIDReplacesInvalidIncomingID(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestID := GetRequestID(r.Context())
+		requestID := requestid.FromContext(r.Context())
 
 		id, err := uuid.Parse(requestID)
 		if err != nil {

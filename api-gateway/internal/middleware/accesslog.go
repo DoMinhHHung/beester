@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/DoMinhHHung/beester/api-gateway/internal/requestid"
 )
 
 type responseWriter struct {
@@ -64,7 +66,10 @@ func AccessLog(
 			r.Context(),
 			slog.LevelInfo,
 			"http request completed",
-			slog.String("request_id", GetRequestID(r.Context())),
+			slog.String(
+				"request_id",
+				requestid.FromContext(r.Context()),
+			),
 			slog.String("method", r.Method),
 			slog.String("path", r.URL.Path),
 			slog.Int("status", statusCode),
